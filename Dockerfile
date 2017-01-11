@@ -1,4 +1,3 @@
-
 FROM ubuntu:trusty
 
 ENV COUCHDB_VERSION couchdb-search
@@ -6,6 +5,8 @@ ENV COUCHDB_VERSION couchdb-search
 ENV MAVEN_VERSION 3.3.3
 
 ENV DEBIAN_FRONTEND noninteractive
+
+
 
 RUN groupadd -r couchdb && useradd -d /usr/src/couchdb -g couchdb couchdb
 
@@ -21,6 +22,19 @@ RUN wget http://packages.erlang-solutions.com/erlang/esl-erlang/FLAVOUR_1_genera
 RUN apt-get install -y --no-install-recommends openjdk-7-jdk
 RUN apt-get install -y --no-install-recommends procps
 RUN apt-get install -y --no-install-recommends libwxgtk2.8-0
+
+RUN gpg --keyserver ha.pool.sks-keyservers.net --recv-keys B42F6819007F00F88E364FD4036A9C25BF357DD4 \
+  && curl -o /usr/local/bin/gosu -fSL "https://github.com/tianon/gosu/releases/download/1.7/gosu-$(dpkg --print-architecture)" \
+  && curl -o /usr/local/bin/gosu.asc -fSL "https://github.com/tianon/gosu/releases/download/1.7/gosu-$(dpkg --print-architecture).asc" \
+  && gpg --verify /usr/local/bin/gosu.asc \
+  && rm /usr/local/bin/gosu.asc \
+  && chmod +x /usr/local/bin/gosu \
+  && gpg --keyserver ha.pool.sks-keyservers.net --recv-keys 6380DC428747F6C393FEACA59A84159D7001A4E5 \
+  && curl -o /usr/local/bin/tini -fSL "https://github.com/krallin/tini/releases/download/v0.9.0/tini" \
+  && curl -o /usr/local/bin/tini.asc -fSL "https://github.com/krallin/tini/releases/download/v0.9.0/tini.asc" \
+  && gpg --verify /usr/local/bin/tini.asc \
+  && rm /usr/local/bin/tini.asc \
+  && chmod +x /usr/local/bin/tini
 
 RUN dpkg -i esl-erlang_18.1-1~ubuntu~precise_amd64.deb
 
@@ -39,10 +53,8 @@ RUN cd /usr/src \
  && cd couchdb \
  && git checkout v2-full-text-search \
  && ./configure --disable-docs \
- && make \
- && cp /usr/src/couchdb/dev/run /usr/local/bin/couchdb \
- && chmod +x /usr/src/couchdb/dev/run \
- && chown -R couchdb:couchdb /usr/src/couchdb
+ && make release \
+ && mv /usr/src/couchdb/rel/couchdb /opt/ 
 
 RUN cd /usr/src \
  && git clone https://github.com/cloudant-labs/clouseau \
@@ -61,7 +73,20 @@ RUN mkdir -p /var/log/supervisor/ \
 # Expose to the outside
 RUN sed -i'' 's/bind_address = 127.0.0.1/bind_address = 0.0.0.0/' /usr/src/couchdb/rel/overlay/etc/default.ini
 
-EXPOSE 5984
-WORKDIR /usr/src/couchdb
+# Add configuration
+COPY local.ini /opt/couchdb/etc/
+COPY vm.args /opt/couchdb/etc/
 
+COPY ./docker-entrypoint.sh /
+
+# Setup directories and permissions
+RUN chmod +x /docker-entrypoint.sh \
+ && mkdir /opt/couchdb/data /opt/couchdb/etc/local.d /opt/couchdb/etc/default.d \
+ && chown -R couchdb:couchdb /opt/couchdb/
+
+WORKDIR /opt/couchdb
+EXPOSE 5984 4369 9100
+VOLUME ["/opt/couchdb/data"]
+
+ENTRYPOINT ["tini", "--", "/docker-entrypoint.sh"]
 ENTRYPOINT ["/usr/bin/supervisord"]
